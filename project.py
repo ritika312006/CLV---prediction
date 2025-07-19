@@ -10,31 +10,18 @@ st.title(" Customer Lifetime Value (CLV) - Prediction ")
 
 st.markdown("Upload your sales data CSV to visualize trends and explore customer value insights.")
 
-# --- Default CSV path ---
-default_path = "online_retail_II(Year 2010-2011).csv"
+# --- File Upload or Default Load ---
+uploaded = st.file_uploader("📁 Upload CSV File", type=["csv"])
 
-# --- File Upload ---
-st.subheader("📁 Upload CSV File (Optional)")
-uploaded = st.file_uploader("You can upload a CSV file, or the app will use the default dataset.", type=["csv"])
-
-# --- Read file (either uploaded or default) ---
-try:
-    if uploaded:
-        raw_bytes = uploaded.read()
-        file_name = uploaded.name
-    else:
-        with open(default_path, "rb") as f:
-            raw_bytes = f.read()
-        file_name = default_path
-
+if uploaded:
+    raw_bytes = uploaded.read()
     raw_sample = raw_bytes[:100000]
     detected_encoding = chardet.detect(raw_sample)['encoding']
-    encoding_used = detected_encoding if detected_encoding and detected_encoding.lower() != "ascii" else "ISO-8859-1"
-    bio = io.BytesIO(raw_bytes)
 
+    encoding_used = "ISO-8859-1" if detected_encoding is None or detected_encoding.lower() == "ascii" else detected_encoding
     st.caption(f"✅ Detected Encoding: `{encoding_used}`")
-    st.success(f"✅ Loaded file: `{file_name}`")
 
+    bio = io.BytesIO(raw_bytes)
     df = pd.read_csv(
         bio,
         encoding=encoding_used,
@@ -43,76 +30,91 @@ try:
         header=0,
         parse_dates=['invoicedate']
     )
+    st.success("✅ File loaded successfully!")
 
-    # --- Clean & Prepare ---
-    df['invoicedate'] = pd.to_datetime(df['invoicedate'], errors='coerce')
-    df = df.dropna(subset=['invoicedate', 'quantity', 'unitprice'])
-    df['profit'] = df['quantity'] * df['unitprice'] * 0.2
+else:
+    st.warning("No file uploaded — loading default ZIP file...")
+    default_path = "online_retail_II(Year 2010-2011).zip"
+    try:
+        with open(default_path, 'rb') as f:
+            raw_data = f.read(100000)
+            detected_encoding = chardet.detect(raw_data)['encoding'] or 'ISO-8859-1'
 
-    # --- Filters ---
-    st.subheader("🔍 Filter Data")
-    col1, col2 = st.columns(2)
-    search_text = col1.text_input("Search Description")
-    countries = df['country'].dropna().unique().tolist()
-    selected_country = col2.selectbox("Select Country", options=["All"] + sorted(countries))
+        df = pd.read_csv(default_path, compression='zip', encoding=detected_encoding,
+                         names=['invoice', 'stockcode', 'description', 'quantity', 'invoicedate',
+                                'unitprice', 'customerid', 'country'],
+                         header=0,
+                         parse_dates=['invoicedate'])
 
-    filtered_df = df.copy()
-    if search_text:
-        filtered_df = filtered_df[filtered_df['description'].str.contains(search_text, case=False, na=False)]
-    if selected_country != "All":
-        filtered_df = filtered_df[filtered_df['country'] == selected_country]
+        st.caption(f"📂 Default file loaded from `{default_path}` with encoding `{detected_encoding}`.")
+    except FileNotFoundError:
+        st.error(f"❌ File not found: {default_path} — Please ensure it exists in the same folder as this app.")
+        st.stop()
 
-    # --- KPIs ---
-    st.subheader("📊 Key Metrics")
-    total_sales = (filtered_df['quantity'] * filtered_df['unitprice']).sum()
-    total_profit = filtered_df['profit'].sum()
-    date_min = filtered_df['invoicedate'].min()
-    date_max = filtered_df['invoicedate'].max()
+# --- Clean & Prepare ---
+df['invoicedate'] = pd.to_datetime(df['invoicedate'], errors='coerce')
+df = df.dropna(subset=['invoicedate', 'quantity', 'unitprice'])
+df['profit'] = df['quantity'] * df['unitprice'] * 0.2
 
-    k1, k2, k3 = st.columns(3)
-    k1.metric("🛒 Total Sales", f"${total_sales:,.2f}")
-    k2.metric("💰 Total Profit", f"${total_profit:,.2f}")
-    k3.metric("📅 Date Range", f"{date_min.date()} → {date_max.date()}")
+# --- Filters ---
+st.subheader("🔍 Filter Data")
+col1, col2 = st.columns(2)
+search_text = col1.text_input("Search Description")
+countries = df['country'].dropna().unique().tolist()
+selected_country = col2.selectbox("Select Country", options=["All"] + sorted(countries))
 
-    # --- Download Filtered Data ---
-    st.download_button("⬇️ Download Filtered Data as CSV", data=filtered_df.to_csv(index=False),
-                       file_name="filtered_sales.csv", mime="text/csv")
+filtered_df = df.copy()
+if search_text:
+    filtered_df = filtered_df[filtered_df['description'].str.contains(search_text, case=False, na=False)]
+if selected_country != "All":
+    filtered_df = filtered_df[filtered_df['country'] == selected_country]
 
-    # --- Data Table ---
-    st.subheader("📄 Data Preview")
-    st.dataframe(filtered_df.head(20), use_container_width=True)
+# --- KPIs ---
+st.subheader("📊 Key Metrics")
+total_sales = (filtered_df['quantity'] * filtered_df['unitprice']).sum()
+total_profit = filtered_df['profit'].sum()
+date_min = filtered_df['invoicedate'].min()
+date_max = filtered_df['invoicedate'].max()
 
-    # --- Sales Over Time ---
-    st.subheader("📈 Sales Over Time")
-    sales_over_time = filtered_df.groupby('invoicedate').apply(lambda x: (x['quantity'] * x['unitprice']).sum())
-    st.line_chart(sales_over_time)
+k1, k2, k3 = st.columns(3)
+k1.metric("🛒 Total Sales", f"${total_sales:,.2f}")
+k2.metric("💰 Total Profit", f"${total_profit:,.2f}")
+k3.metric("📅 Date Range", f"{date_min.date()} → {date_max.date()}")
 
-    # --- Monthly Trend ---
-    st.subheader("📆 Monthly Sales Trend")
-    monthly_sales = filtered_df.resample('M', on='invoicedate').apply(lambda x: (x['quantity'] * x['unitprice']).sum())
-    st.line_chart(monthly_sales)
+# --- Download Filtered Data ---
+st.download_button("⬇️ Download Filtered Data as CSV", data=filtered_df.to_csv(index=False),
+                   file_name="filtered_sales.csv", mime="text/csv")
 
-    # --- CLV Chart: Top Customers ---
-    st.subheader("👤 Top 10 Customers by Total Spend")
-    clv = filtered_df.groupby('customerid').apply(lambda x: (x['quantity'] * x['unitprice']).sum())
-    clv = clv.sort_values(ascending=False).head(10)
-    st.bar_chart(clv)
+# --- Data Table ---
+st.subheader("📄 Data Preview")
+st.dataframe(filtered_df.head(20), use_container_width=True)
 
-    # --- Pie Chart: Orders by Country ---
-    st.subheader("🌍 Orders Distribution by Country")
-    order_dist = filtered_df['country'].value_counts()
-    fig = px.pie(values=order_dist.values, names=order_dist.index, title="Orders by Country")
-    st.plotly_chart(fig)
+# --- Sales Over Time ---
+st.subheader("📈 Sales Over Time")
+sales_over_time = filtered_df.groupby('invoicedate').apply(lambda x: (x['quantity'] * x['unitprice']).sum())
+st.line_chart(sales_over_time)
 
-    st.markdown("---")
-    st.caption("Built for CLV Prediction — Simple, Reusable, and Insightful.")
+# --- Monthly Trend ---
+st.subheader("📆 Monthly Sales Trend")
+monthly_sales = filtered_df.resample('M', on='invoicedate').apply(lambda x: (x['quantity'] * x['unitprice']).sum())
+st.line_chart(monthly_sales)
 
-except FileNotFoundError:
-    st.error(f"❌ File not found: `{default_path}` — Please ensure it exists in the same folder as this app.")
-except Exception as e:
-    st.error(f"❌ Failed to load CSV: {e}")
+# --- CLV Chart: Top Customers ---
+st.subheader("👤 Top 10 Customers by Total Spend")
+clv = filtered_df.groupby('customerid').apply(lambda x: (x['quantity'] * x['unitprice']).sum())
+clv = clv.sort_values(ascending=False).head(10)
+st.bar_chart(clv)
 
-# --- Use Cases & About ---
+# --- Pie Chart: Orders by Country ---
+st.subheader("🌍 Orders Distribution by Country")
+order_dist = filtered_df['country'].value_counts()
+fig = px.pie(values=order_dist.values, names=order_dist.index, title="Orders by Country")
+st.plotly_chart(fig)
+
+st.markdown("---")
+st.caption("Built for CLV Prediction — Simple, Reusable, and Insightful.")
+
+# --- Add Use Cases and About section ---
 st.markdown("---")
 with st.expander("💡 Use Cases: How This Dashboard Helps"):
     st.markdown("""
