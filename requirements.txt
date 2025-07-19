@@ -1,0 +1,11 @@
+streamlit
+chardet
+pandas
+numpy
+lifetimes
+scikit-learn
+matplotlib
+seaborn
+plotly
+altair
+pickle-mixin
